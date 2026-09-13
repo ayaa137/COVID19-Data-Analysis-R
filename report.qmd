@@ -1,0 +1,666 @@
+---
+title: "COVID-19 Data Analysis in R"
+subtitle: "Early pandemic dynamics and country-level socioeconomic context"
+author: "Aya Abdine"
+format:
+  html:
+    toc: true
+    number-sections: true
+    code-fold: true
+    code-summary: "Show code"
+    embed-resources: true
+    theme: cosmo
+    fig-width: 8
+    fig-height: 4.8
+    df-print: paged
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(slider)
+library(scales)
+library(broom)
+library(knitr)
+library(gt)
+library(ggrepel)
+
+theme_set(theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray35"),
+    panel.grid.minor = element_blank(),
+    legend.position = "bottom"
+  ))
+
+options(
+  dplyr.summarise.inform = FALSE,
+  scipen = 999
+)
+
+data_dir <- "data"
+```
+
+```{r helpers}
+fmt_num <- label_number(big.mark = ",", accuracy = 1)
+fmt_pct <- label_percent(accuracy = 0.1)
+
+ma7 <- function(x) slide_dbl(x, mean, .before = 6, .complete = FALSE)
+
+lag_candidates <- function(df, cases_col = cases_ma7, deaths_col = deaths_ma7,
+                           lags = 0:28) {
+  cases_col <- enquo(cases_col)
+  deaths_col <- enquo(deaths_col)
+
+  map_dfr(lags, \(lag_days) {
+    x <- dplyr::lag(pull(df, !!cases_col), lag_days)
+    y <- pull(df, !!deaths_col)
+    ok <- is.finite(x) & is.finite(y) & x > 0
+    scale <- sum(x[ok] * y[ok]) / sum(x[ok]^2)
+    tibble(
+      lag_days = lag_days,
+      scale = scale,
+      rmse = sqrt(mean((y[ok] - scale * x[ok])^2)),
+      n = sum(ok)
+    )
+  }) |>
+    filter(is.finite(scale), is.finite(rmse), n >= 21)
+}
+
+estimate_lag_scale <- function(df, cases_col = cases_ma7, deaths_col = deaths_ma7,
+                               lags = 0:28) {
+  lag_candidates(df, {{ cases_col }}, {{ deaths_col }}, lags) |>
+    slice_min(rmse, n = 1, with_ties = FALSE)
+}
+```
+
+```{r data-prep}
+who_raw <- read_csv(file.path(data_dir, "WHO-COVID-19.csv"), show_col_types = FALSE) |>
+  clean_names()
+
+wdi_raw <- read_csv(file.path(data_dir, "WDI.csv"), show_col_types = FALSE) |>
+  clean_names()
+
+wdi <- wdi_raw |>
+  rename(
+    urban_pop = urban_population_percent_of_total_population,
+    rural_pop = rural_population_percent_of_total_population,
+    below_median_income = proportion_of_people_living_below_50_percent_of_median_income_percent,
+    pop = population_total,
+    pop_older65 = population_ages_65_and_above_percent_of_total_population,
+    pop_density = population_density_people_per_sq_km_of_land_area,
+    physicians_per_1000 = physicians_per_1_000_people,
+    life_expectancy = life_expectancy_at_birth_total_years,
+    gdp_per_capita = gdp_per_capita_ppp_current_international
+  ) |>
+  mutate(
+    country_match = recode(
+      country,
+      "Bahamas, The" = "Bahamas",
+      "Brunei Darussalam" = "Brunei Darussalam",
+      "Congo, Dem. Rep." = "Democratic Republic of the Congo",
+      "Congo, Rep." = "Congo",
+      "Cote d'Ivoire" = "Cote d'Ivoire",
+      "Egypt, Arab Rep." = "Egypt",
+      "Gambia, The" = "Gambia",
+      "Iran, Islamic Rep." = "Iran (Islamic Republic of)",
+      "Korea, Rep." = "Republic of Korea",
+      "Kyrgyz Republic" = "Kyrgyzstan",
+      "Lao PDR" = "Lao People's Democratic Republic",
+      "Micronesia, Fed. Sts." = "Micronesia (Federated States of)",
+      "Russian Federation" = "Russian Federation",
+      "Slovak Republic" = "Slovakia",
+      "St. Kitts and Nevis" = "Saint Kitts and Nevis",
+      "St. Lucia" = "Saint Lucia",
+      "St. Vincent and the Grenadines" = "Saint Vincent and the Grenadines",
+      "Syrian Arab Republic" = "Syrian Arab Republic",
+      "United States" = "United States of America",
+      "Venezuela, RB" = "Venezuela (Bolivarian Republic of)",
+      "Yemen, Rep." = "Yemen",
+      .default = country
+    )
+  )
+
+who <- who_raw |>
+  mutate(
+    date_reported = as_date(date_reported),
+    new_cases_clean = pmax(coalesce(new_cases, 0), 0),
+    new_deaths_clean = pmax(coalesce(new_deaths, 0), 0),
+    country_match = recode(country, "The United Kingdom" = "United Kingdom",
+                           .default = country)
+  )
+
+country_daily <- who |>
+  arrange(country_match, date_reported) |>
+  group_by(country_match, country_code, who_region) |>
+  mutate(
+    cases_ma7 = ma7(new_cases_clean),
+    deaths_ma7 = ma7(new_deaths_clean),
+    cum_cases = cumsum(new_cases_clean),
+    cum_deaths = cumsum(new_deaths_clean)
+  ) |>
+  ungroup()
+
+latest_country <- country_daily |>
+  group_by(country_match, country_code, who_region) |>
+  slice_max(date_reported, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  left_join(wdi, by = "country_match") |>
+  mutate(
+    cases_per_100k = cum_cases / pop * 1e5,
+    deaths_per_100k = cum_deaths / pop * 1e5,
+    log_deaths_per_100k = log1p(deaths_per_100k)
+  )
+
+matched_countries <- latest_country |> filter(!is.na(pop)) |> nrow()
+unmatched_countries <- latest_country |> filter(is.na(pop)) |> nrow()
+
+data_summary <- tibble(
+  Dataset = c("WHO COVID-19", "World Development Indicators"),
+  Observations = c(nrow(who), nrow(wdi)),
+  Countries = c(n_distinct(who$country), n_distinct(wdi$country)),
+  `Date range` = c(
+    paste(format(min(who$date_reported)), "to", format(max(who$date_reported))),
+    "single country-year extract"
+  ),
+  `Main variables` = c(
+    "daily reported cases and deaths",
+    "population, age, density, physicians, life expectancy, GDP"
+  )
+)
+
+quality_summary <- tibble(
+  Check = c(
+    "Missing dates",
+    "Missing country names",
+    "Missing new cases",
+    "Missing new deaths",
+    "Negative case corrections",
+    "Negative death corrections",
+    "WHO countries matched to WDI population"
+  ),
+  Value = c(
+    sum(is.na(who$date_reported)),
+    sum(is.na(who$country)),
+    sum(is.na(who$new_cases)),
+    sum(is.na(who$new_deaths)),
+    sum(who$new_cases < 0, na.rm = TRUE),
+    sum(who$new_deaths < 0, na.rm = TRUE),
+    paste0(matched_countries, " of ", matched_countries + unmatched_countries)
+  )
+)
+```
+
+# Introduction
+
+This project studies how reported COVID-19 cases and deaths evolved during the early pandemic and how later country-level mortality patterns relate to demographic, health, and socioeconomic indicators. The daily pandemic data come from the World Health Organization, and the country context comes from World Bank Development Indicators.
+
+Combining the two sources is useful because the time series show epidemic timing, while the development indicators describe country conditions that may shape vulnerability, reporting capacity, and health-system context. The analysis uses Germany as the main time-series case study, compares Germany with Italy, France, and the United Kingdom, and then expands to cross-country indicators.
+
+```{r dataset-summary}
+data_summary |>
+  gt() |>
+  fmt_number(columns = Observations:Countries, decimals = 0) |>
+  tab_options(table.font.size = px(13))
+```
+
+# Data Preparation
+
+The WHO file contains `r nrow(who)` daily country records from `r min(who$date_reported)` to `r max(who$date_reported)`. The WDI file contains `r nrow(wdi)` countries and `r ncol(wdi_raw)` source columns. Column names were standardized, dates were parsed as dates, and long WDI indicator names were renamed to compact analysis names.
+
+Daily negative corrections occur when reporting agencies revise earlier counts. They are important for raw data quality, but they can make cumulative totals decrease and can distort log transforms, smoothing, and lag optimization. For those derived measures, this report uses nonnegative daily increments while reporting the correction counts below.
+
+```{r quality-table}
+quality_summary |>
+  gt() |>
+  tab_options(table.font.size = px(13))
+```
+
+The country merge uses explicit name mappings for genuine naming differences such as the United States, the Republic of Korea, and several World Bank abbreviated country names. After these corrections, `r matched_countries` WHO country series match a WDI population value; `r unmatched_countries` are still unmatched and are excluded from population-normalized cross-country analyses.
+
+# COVID-19 Time Evolution
+
+```{r germany-first-wave}
+germany_wave <- country_daily |>
+  filter(country_match == "Germany",
+         date_reported >= as_date("2020-02-15"),
+         date_reported <= as_date("2020-06-30"))
+
+germany_wave |>
+  select(date_reported, cases_ma7, deaths_ma7) |>
+  pivot_longer(-date_reported, names_to = "series", values_to = "value") |>
+  mutate(series = recode(series,
+                         cases_ma7 = "New cases, 7-day average",
+                         deaths_ma7 = "New deaths, 7-day average")) |>
+  ggplot(aes(date_reported, value, color = series)) +
+  geom_line(linewidth = 0.9) +
+  scale_color_manual(values = c("#2a6f97", "#b23a48")) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "Germany's first COVID-19 wave rose quickly and peaked in spring 2020",
+    subtitle = "Daily reported cases and deaths are smoothed with a trailing 7-day average",
+    x = NULL,
+    y = "Daily count",
+    color = NULL
+  )
+```
+
+Germany's first-wave case curve accelerated through March 2020, peaked in early April, and then declined through late spring. Deaths followed the same broad pattern at a lower level and with a delay, which is expected because reported deaths occur after infections and case confirmation.
+
+# European Comparison
+
+```{r european-comparison}
+european <- country_daily |>
+  filter(country_match %in% c("Germany", "Italy", "France", "United Kingdom"),
+         date_reported <= as_date("2020-06-30")) |>
+  left_join(wdi |> select(country_match, pop), by = "country_match") |>
+  mutate(
+    country_label = country_match,
+    cum_deaths_per_100k = cum_deaths / pop * 1e5
+  )
+
+european |>
+  ggplot(aes(date_reported, cum_deaths_per_100k, color = country_label)) +
+  geom_line(linewidth = 0.9) +
+  scale_color_manual(values = c("#2a6f97", "#b23a48", "#f2a541", "#4f772d")) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_y_continuous(labels = label_number(accuracy = 1)) +
+  labs(
+    title = "Early mortality burden differed sharply across major European countries",
+    subtitle = "Cumulative reported COVID-19 deaths per 100,000 people through June 2020",
+    x = NULL,
+    y = "Deaths per 100,000",
+    color = NULL
+  )
+```
+
+Normalizing by population makes the country comparison more meaningful than raw cumulative deaths. Italy, France, and the United Kingdom reached substantially higher reported deaths per 100,000 people than Germany by the end of June 2020. This figure describes observed reporting outcomes only; it does not identify which policies or structural factors caused the differences.
+
+# Cases to Deaths Lag
+
+```{r germany-lag}
+germany_lag <- estimate_lag_scale(germany_wave)
+
+germany_fit <- germany_wave |>
+  mutate(
+    shifted_scaled_cases = germany_lag$scale * lag(cases_ma7, germany_lag$lag_days)
+  )
+
+germany_fit |>
+  select(date_reported, deaths_ma7, shifted_scaled_cases) |>
+  pivot_longer(-date_reported, names_to = "series", values_to = "value") |>
+  mutate(series = recode(series,
+                         deaths_ma7 = "Observed deaths, 7-day average",
+                         shifted_scaled_cases = "Cases shifted and scaled")) |>
+  ggplot(aes(date_reported, value, color = series)) +
+  geom_line(linewidth = 0.9, na.rm = TRUE) +
+  scale_color_manual(values = c("#b23a48", "#2a6f97")) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  labs(
+    title = "Deaths followed reported cases after a measurable delay in Germany",
+    subtitle = paste0("Best lag = ", germany_lag$lag_days,
+                      " days; scale = ", round(germany_lag$scale, 3),
+                      "; RMSE = ", round(germany_lag$rmse, 1)),
+    x = NULL,
+    y = "Daily deaths",
+    color = NULL
+  )
+```
+
+A grid search over lags from 0 to 28 days estimates Germany's best first-wave case-to-death delay at `r germany_lag$lag_days` days. The fitted scale is `r round(germany_lag$scale, 3)`, with RMSE `r round(germany_lag$rmse, 1)` daily deaths. The scale should be interpreted as a reporting-based case-to-death ratio for this period, not as an infection fatality rate, because reported cases missed many infections and testing changed over time.
+
+```{r later-lag}
+germany_later <- country_daily |>
+  filter(country_match == "Germany",
+         date_reported >= as_date("2021-01-01"),
+         date_reported <= as_date("2021-05-31"))
+
+germany_later_lag <- estimate_lag_scale(germany_later)
+
+lag_compare <- bind_rows(
+  tibble(Period = "First wave, 2020", germany_lag),
+  tibble(Period = "Later period, 2021", germany_later_lag)
+) |>
+  select(Period, lag_days, scale, rmse, n)
+
+lag_compare |>
+  gt() |>
+  fmt_number(columns = c(scale, rmse), decimals = 3) |>
+  cols_label(
+    lag_days = "Lag (days)",
+    scale = "Scale",
+    rmse = "RMSE",
+    n = "Days used"
+  )
+```
+
+The lag-and-scale relationship is not stable across the pandemic. Testing availability, variant mix, vaccination, clinical treatment, and age distribution of cases all changed, so a scale estimated in one period should not be treated as a permanent biological constant.
+
+# Detecting the First-Wave Turning Point
+
+```{r turning-point}
+turning <- germany_wave |>
+  mutate(case_change = cases_ma7 - lag(cases_ma7)) |>
+  filter(!is.na(case_change))
+
+fastest_growth <- turning |> slice_max(case_change, n = 1)
+case_peak <- germany_wave |> slice_max(cases_ma7, n = 1)
+decline_start <- turning |>
+  filter(date_reported > fastest_growth$date_reported, case_change < 0) |>
+  slice_min(date_reported, n = 1)
+
+germany_wave |>
+  ggplot(aes(date_reported, cases_ma7)) +
+  geom_line(color = "#2a6f97", linewidth = 0.9) +
+  geom_vline(xintercept = c(fastest_growth$date_reported,
+                            case_peak$date_reported,
+                            decline_start$date_reported),
+             color = c("#f2a541", "#b23a48", "#4f772d"),
+             linetype = "dashed") +
+  annotate("text", x = fastest_growth$date_reported, y = max(germany_wave$cases_ma7) * 0.95,
+           label = "Fastest growth", angle = 90, vjust = -0.4, size = 3.3) +
+  annotate("text", x = case_peak$date_reported, y = max(germany_wave$cases_ma7) * 0.95,
+           label = "Peak", angle = 90, vjust = -0.4, size = 3.3) +
+  annotate("text", x = decline_start$date_reported, y = max(germany_wave$cases_ma7) * 0.95,
+           label = "Decline begins", angle = 90, vjust = -0.4, size = 3.3) +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %Y") +
+  scale_y_continuous(labels = comma) +
+  labs(
+    title = "The first wave changed direction after rapid March growth",
+    subtitle = "Turning points are based on day-to-day changes in the 7-day average",
+    x = NULL,
+    y = "Daily cases, 7-day average"
+  )
+```
+
+The fastest increase in Germany's smoothed reported cases occurs on `r fastest_growth$date_reported`, before the smoothed case peak on `r case_peak$date_reported`. The first sustained transition into decline begins around `r decline_start$date_reported`. This derivative-style view is a simple way to separate acceleration, peak burden, and the start of improvement.
+
+# Socioeconomic Context: World Development Indicators
+
+```{r wdi-summary}
+wdi_summary <- wdi |>
+  summarise(
+    Countries = n(),
+    `Median population` = median(pop, na.rm = TRUE),
+    `Median aged 65+ (%)` = median(pop_older65, na.rm = TRUE),
+    `Median physicians per 1,000` = median(physicians_per_1000, na.rm = TRUE),
+    `Median life expectancy` = median(life_expectancy, na.rm = TRUE),
+    `Median GDP per capita PPP` = median(gdp_per_capita, na.rm = TRUE)
+  ) |>
+  pivot_longer(everything(), names_to = "Measure", values_to = "Value")
+
+wdi_summary |>
+  gt() |>
+  fmt_number(columns = Value, decimals = 1) |>
+  tab_options(table.font.size = px(13))
+```
+
+The WDI data provide a compact profile of population scale, age structure, density, health-system capacity, longevity, and income. Missingness is uneven across indicators, so later PCA and regression sections use complete observations for selected variables and report how many countries remain.
+
+# Correlation Analysis
+
+```{r correlations}
+corr_vars <- wdi |>
+  select(urban_pop, pop_older65, pop_density, physicians_per_1000,
+         life_expectancy, gdp_per_capita) |>
+  mutate(gdp_per_capita = log10(gdp_per_capita))
+
+corr_long <- cor(corr_vars, use = "pairwise.complete.obs") |>
+  as_tibble(rownames = "var1") |>
+  pivot_longer(-var1, names_to = "var2", values_to = "corr")
+
+corr_long |>
+  mutate(
+    var1 = str_replace_all(var1, "_", " "),
+    var2 = str_replace_all(var2, "_", " ")
+  ) |>
+  ggplot(aes(var1, var2, fill = corr)) +
+  geom_tile(color = "white", linewidth = 0.6) +
+  geom_text(aes(label = round(corr, 2)), size = 3.2) +
+  scale_fill_gradient2(low = "#b23a48", mid = "white", high = "#2a6f97",
+                       limits = c(-1, 1), labels = label_number(accuracy = 0.1)) +
+  coord_equal() +
+  labs(
+    title = "Development indicators are strongly interrelated",
+    subtitle = "GDP per capita is log-transformed before correlation",
+    x = NULL,
+    y = NULL,
+    fill = "Correlation"
+  ) +
+  theme(axis.text.x = element_text(angle = 35, hjust = 1))
+```
+
+The strongest relationships are between income, life expectancy, older population share, and physicians per 1,000 people. Population density is less consistently related to the other development indicators, so it captures a different aspect of country context.
+
+# Principal Component Analysis
+
+```{r pca}
+pca_data <- wdi |>
+  select(country, iso3c, region, urban_pop, pop_older65, pop_density,
+         physicians_per_1000, life_expectancy, gdp_per_capita) |>
+  mutate(
+    pop_density = log10(pop_density),
+    gdp_per_capita = log10(gdp_per_capita)
+  ) |>
+  drop_na()
+
+pca_fit <- prcomp(
+  pca_data |> select(urban_pop:gdp_per_capita),
+  center = TRUE,
+  scale. = TRUE
+)
+
+pca_scores <- as_tibble(pca_fit$x[, 1:2]) |>
+  bind_cols(pca_data |> select(country, iso3c, region))
+
+pca_var <- tibble(
+  Component = paste0("PC", seq_along(pca_fit$sdev)),
+  variance_explained = pca_fit$sdev^2 / sum(pca_fit$sdev^2)
+)
+
+pca_loadings <- as_tibble(pca_fit$rotation[, 1:2], rownames = "Variable") |>
+  mutate(across(c(PC1, PC2), \(x) round(x, 3))) |>
+  arrange(desc(abs(PC1)))
+
+pca_var |> 
+  slice(1:4) |>
+  gt() |>
+  fmt_percent(columns = variance_explained, decimals = 1) |>
+  cols_label(variance_explained = "Variance explained")
+```
+
+```{r pca-loadings}
+pca_loadings |>
+  gt() |>
+  tab_options(table.font.size = px(13))
+```
+
+```{r pca-plot}
+pca_scores |>
+  ggplot(aes(PC1, PC2, color = region, label = iso3c)) +
+  geom_hline(yintercept = 0, color = "gray80") +
+  geom_vline(xintercept = 0, color = "gray80") +
+  geom_point(alpha = 0.75, size = 2.2) +
+  geom_text_repel(size = 2.7, max.overlaps = 35, show.legend = FALSE) +
+  labs(
+    title = "PCA summarizes country development profiles",
+    subtitle = paste0("Complete observations: ", nrow(pca_data),
+                      " countries; PC1 + PC2 explain ",
+                      percent(sum(pca_var$variance_explained[1:2]), accuracy = 0.1)),
+    x = paste0("PC1 (", percent(pca_var$variance_explained[1], accuracy = 0.1), ")"),
+    y = paste0("PC2 (", percent(pca_var$variance_explained[2], accuracy = 0.1), ")"),
+    color = "Region"
+  )
+```
+
+PC1 explains `r percent(pca_var$variance_explained[1], accuracy = 0.1)` of the selected-indicator variance. Its largest loadings are `r pca_loadings$Variable[1]`, `r pca_loadings$Variable[2]`, and `r pca_loadings$Variable[3]`, so the first component mainly separates countries by a broad package of income, longevity, medical capacity, age structure, and urbanization. PC2 explains `r percent(pca_var$variance_explained[2], accuracy = 0.1)` and is more strongly shaped by variables whose loadings differ from PC1, especially density and the remaining demographic contrast.
+
+# COVID Mortality and Socioeconomic Indicators
+
+```{r regression}
+model_data <- latest_country |>
+  filter(!is.na(deaths_per_100k)) |>
+  select(country = country_match, region, deaths_per_100k, log_deaths_per_100k,
+         gdp_per_capita, life_expectancy, pop_older65, physicians_per_1000) |>
+  mutate(log_gdp_per_capita = log10(gdp_per_capita)) |>
+  drop_na()
+
+predictor_corr <- model_data |>
+  select(log_gdp_per_capita, life_expectancy, pop_older65, physicians_per_1000) |>
+  cor()
+
+mortality_model <- lm(
+  log_deaths_per_100k ~ log_gdp_per_capita + pop_older65 + physicians_per_1000,
+  data = model_data
+)
+
+model_table <- tidy(mortality_model, conf.int = TRUE) |>
+  filter(term != "(Intercept)") |>
+  mutate(
+    term = recode(term,
+                  log_gdp_per_capita = "Log10 GDP per capita",
+                  pop_older65 = "Population aged 65+ (%)",
+                  physicians_per_1000 = "Physicians per 1,000"),
+    direction = if_else(estimate >= 0, "positive", "negative"),
+    p_value = if_else(p.value < 0.001, "< 0.001", sprintf("%.3f", p.value))
+  )
+
+model_glance <- glance(mortality_model)
+
+model_table |>
+  select(term, direction, estimate, conf.low, conf.high, p_value) |>
+  gt() |>
+  fmt_number(columns = c(estimate, conf.low, conf.high), decimals = 3) |>
+  cols_label(
+    term = "Predictor",
+    direction = "Direction",
+    estimate = "Estimate",
+    conf.low = "95% CI low",
+    conf.high = "95% CI high",
+    p_value = "p-value"
+  )
+```
+
+This compact model uses `r nrow(model_data)` complete countries and has an adjusted R-squared of `r percent(model_glance$adj.r.squared, accuracy = 0.1)` for log deaths per 100,000 population. The outcome is log-transformed because cross-country mortality is highly skewed. Life expectancy is excluded from the final model because it is strongly correlated with income and age structure, which would make the coefficient interpretation unstable in a small observational country-level model.
+
+```{r diagnostics}
+augment(mortality_model) |>
+  ggplot(aes(.fitted, .resid)) +
+  geom_hline(yintercept = 0, color = "gray70") +
+  geom_point(color = "#2a6f97", alpha = 0.75) +
+  labs(
+    title = "Regression residuals show substantial unexplained country variation",
+    subtitle = "Cross-country ecological models should be interpreted descriptively",
+    x = "Fitted log deaths per 100,000",
+    y = "Residual"
+  )
+```
+
+The model should not be read causally. Countries differ in testing, certification, timing, policies, age-specific exposure, health-system stress, and reporting quality. The regression is useful as a compact descriptive check of whether mortality outcomes align with broad country characteristics, not as proof that any single indicator caused higher or lower mortality.
+
+# Exponential Growth
+
+```{r exponential-growth}
+growth_data <- country_daily |>
+  filter(country_match == "Germany",
+         date_reported >= as_date("2020-03-01"),
+         date_reported <= as_date("2020-03-25"),
+         new_cases_clean > 0) |>
+  mutate(day = as.integer(date_reported - min(date_reported)))
+
+growth_model <- lm(log(new_cases_clean) ~ day, data = growth_data)
+growth_rate <- coef(growth_model)[["day"]]
+doubling_time <- log(2) / growth_rate
+
+growth_data |>
+  mutate(predicted = exp(predict(growth_model))) |>
+  ggplot(aes(date_reported)) +
+  geom_point(aes(y = new_cases_clean), color = "#2a6f97", alpha = 0.8) +
+  geom_line(aes(y = predicted), color = "#b23a48", linewidth = 0.9) +
+  scale_y_log10(labels = comma) +
+  scale_x_date(date_breaks = "1 week", date_labels = "%b %d") +
+  labs(
+    title = "Germany's early March case growth was approximately exponential",
+    subtitle = paste0("Estimated daily growth rate = ", percent(growth_rate, accuracy = 0.1),
+                      "; doubling time = ", round(doubling_time, 1), " days"),
+    x = NULL,
+    y = "New reported cases, log scale"
+  )
+```
+
+During `r min(growth_data$date_reported)` to `r max(growth_data$date_reported)`, a log-linear model estimates daily reported case growth of `r percent(growth_rate, accuracy = 0.1)`. That corresponds to an approximate doubling time of `r round(doubling_time, 1)` days, which captures the speed of early spread before later behavioral, testing, and policy changes altered the trajectory.
+
+# Cross-Country Lag and Scale
+
+```{r cross-country-lag}
+first_wave_filtered <- country_daily |>
+  filter(date_reported >= as_date("2020-02-15"),
+         date_reported <= as_date("2020-06-30")) |>
+  group_by(country_match) |>
+  filter(max(cum_deaths, na.rm = TRUE) >= 100,
+         max(cum_cases, na.rm = TRUE) >= 1000)
+
+first_wave_candidates <- first_wave_filtered |>
+  group_modify(\(.x, .y) lag_candidates(.x)) |>
+  ungroup()
+
+first_wave_multi <- first_wave_candidates |>
+  group_by(country_match) |>
+  slice_min(rmse, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  left_join(wdi |> select(country_match, pop_older65, physicians_per_1000, gdp_per_capita),
+            by = "country_match")
+
+lag_boundary_check <- first_wave_multi |>
+  filter(lag_days == 0) |>
+  select(country_match, rmse_0 = rmse) |>
+  inner_join(
+    first_wave_candidates |>
+      filter(lag_days > 0) |>
+      group_by(country_match) |>
+      slice_min(rmse, n = 1, with_ties = FALSE) |>
+      ungroup() |>
+      select(country_match, next_lag = lag_days, rmse_next = rmse),
+    by = "country_match"
+  ) |>
+  mutate(rmse_increase = (rmse_next - rmse_0) / rmse_0)
+
+first_wave_multi |>
+  ggplot(aes(lag_days)) +
+  geom_histogram(binwidth = 2, boundary = 0, fill = "#2a6f97", color = "white") +
+  labs(
+    title = "Estimated first-wave case-to-death delays cluster within a few weeks",
+    subtitle = paste0("Countries included after data-quality filters: ", nrow(first_wave_multi)),
+    x = "Best lag (days)",
+    y = "Countries"
+  )
+```
+
+```{r cross-country-scale}
+first_wave_multi |>
+  filter(!is.na(physicians_per_1000), is.finite(scale)) |>
+  ggplot(aes(physicians_per_1000, scale)) +
+  geom_point(color = "#2a6f97", alpha = 0.75) +
+  geom_smooth(method = "lm", se = TRUE, color = "#b23a48", linewidth = 0.8) +
+  scale_y_continuous(labels = label_number(accuracy = 0.001)) +
+  labs(
+    title = "Case-to-death scale varies widely across countries",
+    subtitle = "Reported-case scale reflects detection, demographics, timing, and reporting, not only severity",
+    x = "Physicians per 1,000 people",
+    y = "Estimated death scale"
+  )
+```
+
+The multi-country lag estimates use `r nrow(first_wave_multi)` countries with enough first-wave cases and deaths to avoid fitting noise. The median estimated delay is `r median(first_wave_multi$lag_days, na.rm = TRUE)` days. `r nrow(lag_boundary_check)` countries optimize at the lower boundary of 0 days; when lag 0 is disallowed, the median RMSE increase for those countries is `r percent(median(lag_boundary_check$rmse_increase, na.rm = TRUE), accuracy = 0.1)`, which suggests the boundary cases are mostly flat or weakly identified fits rather than strong evidence of same-day epidemiological timing. The scale estimates vary much more than the lags, which is consistent with large cross-country differences in testing, reporting, case mix, and health-system pressure.
+
+# Conclusion
+
+Germany's first wave shows a rapid March 2020 rise, an early April case peak, and a measurable delay between reported cases and deaths. The best first-wave lag is `r germany_lag$lag_days` days with a fitted reported-case death scale of `r round(germany_lag$scale, 3)`, but that relationship changes in later periods.
+
+The WDI analysis shows that income, longevity, medical capacity, urbanization, and age structure form a strong shared development profile; PC1 alone explains `r percent(pca_var$variance_explained[1], accuracy = 0.1)` of selected-indicator variation. The cross-country mortality regression has an adjusted R-squared of `r percent(model_glance$adj.r.squared, accuracy = 0.1)` for log deaths per 100,000 in complete cases, suggesting meaningful but incomplete alignment between mortality outcomes and structural indicators. The main limitations are reporting differences, ecological aggregation, missing indicators, changing testing practices, and the observational design. Future work could add age-specific outcomes and policy timing to separate exposure, vulnerability, and reporting effects more carefully.

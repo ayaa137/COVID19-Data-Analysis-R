@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>COVID-19 Data Analysis in R | Aya Abdine</title>
+
+  <meta
+    name="description"
+    content="COVID-19 time-series and socioeconomic analysis in R using WHO and World Bank data."
+  />
+
+  <style>
+    :root {
+      --navy: #0f172a;
+      --navy-soft: #1e293b;
+      --teal: #0f766e;
+      --teal-light: #14b8a6;
+      --red: #dc2626;
+      --red-soft: #ef4444;
+      --gray: #64748b;
+      --light-gray: #f8fafc;
+      --border: #e2e8f0;
+      --white: #ffffff;
+      --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+      --radius: 18px;
+      --max-width: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family:
+        Inter,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        sans-serif;
+      color: var(--navy);
+      background: var(--white);
+      line-height: 1.7;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      max-width: 100%;
+      display: block;
+    }
+
+    .container {
+      width: min(92%, var(--max-width));
+      margin: auto;
+    }
+
+    /* NAVIGATION */
+
+    header {
+      background: rgba(255, 255, 255, 0.96);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      backdrop-filter: blur(12px);
+    }
+
+    .navbar {
+      min-height: 74px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 30px;
+    }
+
+    .brand {
+      font-weight: 800;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand span {
+      color: var(--teal);
+    }
+
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      font-size: 0.92rem;
+      font-weight: 600;
+    }
+
+    nav a {
+      transition: 0.2s ease;
+    }
+
+    nav a:hover {
+      color: var(--teal);
+    }
+
+    /* HERO */
+
+    .hero {
+      padding: 110px 0 80px;
+      text-align: center;
+      background:
+        radial-gradient(
+          circle at 20% 20%,
+          rgba(20, 184, 166, 0.08),
+          transparent 35%
+        ),
+        radial-gradient(
+          circle at 80% 10%,
+          rgba(220, 38, 38, 0.06),
+          transparent 35%
+        );
+    }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 18px;
+      color: var(--teal);
+      text-transform: uppercase;
+      font-size: 0.78rem;
+      letter-spacing: 0.16em;
+      font-weight: 800;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 5rem);
+      line-height: 1.05;
+      max-width: 900px;
+      margin: 0 auto 24px;
+      letter-spacing: -0.055em;
+    }
+
+    .hero h1 span {
+      color: var(--teal);
+    }
+
+    .hero-text {
+      max-width: 780px;
+      margin: auto;
+      color: var(--gray);
+      font-size: 1.08rem;
+    }
+
+    .author-line {
+      margin-top: 28px;
+      font-size: 0.94rem;
+      color: var(--gray);
+    }
+
+    .author-line strong {
+      color: var(--navy);
+    }
+
+    .hero-buttons {
+      margin-top: 34px;
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 13px 24px;
+      border-radius: 11px;
+      border: 1px solid var(--border);
+      font-weight: 700;
+      transition: 0.2s ease;
+      background: var(--white);
+    }
+
+    .btn-primary {
+      background: var(--navy);
+      color: var(--white);
+      border-color: var(--navy);
+    }
+
+    .btn-primary:hover {
+      background: var(--teal);
+      border-color: var(--teal);
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--teal);
+      color: var(--teal);
+      transform: translateY(-2px);
+    }
+
+    /* STAT CARDS */
+
+    .stats {
+      padding: 10px 0 100px;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+
+    .stat-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 34px 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+      background: var(--white);
+    }
+
+    .stat-number {
+      color: var(--teal);
+      font-size: 2rem;
+      font-weight: 850;
+      letter-spacing: -0.04em;
+      margin-bottom: 6px;
+    }
+
+    .stat-label {
+      color: var(--gray);
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    /* SECTIONS */
+
+    section {
+      padding: 90px 0;
+    }
+
+    .soft-section {
+      background: var(--light-gray);
+    }
+
+    .section-label {
+      color: var(--teal);
+      text-transform: uppercase;
+      font-size: 0.74rem;
+      font-weight: 800;
+      letter-spacing: 0.15em;
+      margin-bottom: 8px;
+    }
+
+    .section-title {
+      font-size: clamp(2rem, 4vw, 3rem);
+      letter-spacing: -0.045em;
+      line-height: 1.12;
+      margin-bottom: 22px;
+    }
+
+    .section-intro {
+      max-width: 800px;
+      color: var(--gray);
+      margin-bottom: 44px;
+      font-size: 1rem;
+    }
+
+    /* RESEARCH QUESTION */
+
+    .research-box {
+      border-left: 5px solid var(--red);
+      background: var(--light-gray);
+      padding: 30px 34px;
+      margin-top: 36px;
+      max-width: 900px;
+    }
+
+    .research-box strong {
+      display: block;
+      margin-bottom: 12px;
+      color: var(--navy);
+    }
+
+    .research-box p {
+      color: var(--navy-soft);
+      font-size: 1.08rem;
+    }
+
+    /* CARDS */
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 22px;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 30px;
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+
+    .card-icon {
+      font-size: 1.7rem;
+      margin-bottom: 13px;
+    }
+
+    .card h3 {
+      font-size: 1.15rem;
+      margin-bottom: 10px;
+    }
+
+    .card p {
+      color: var(--gray);
+      font-size: 0.95rem;
+    }
+
+    .card ul {
+      padding-left: 20px;
+      margin-top: 15px;
+      color: var(--gray);
+    }
+
+    .card li {
+      margin-bottom: 7px;
+    }
+
+    /* METHOD */
+
+    .method-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 22px;
+    }
+
+    .method-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      padding: 30px;
+      box-shadow: var(--shadow);
+    }
+
+    .method-card h3 {
+      margin: 14px 0 9px;
+    }
+
+    .method-card p {
+      color: var(--gray);
+      font-size: 0.94rem;
+    }
+
+    /* RESULTS */
+
+    .result-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 22px;
+    }
+
+    .result-card {
+      padding: 30px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+
+    .result-value {
+      color: var(--red);
+      font-size: 2rem;
+      font-weight: 850;
+      letter-spacing: -0.04em;
+    }
+
+    .result-card h3 {
+      margin: 4px 0 8px;
+      font-size: 1.08rem;
+    }
+
+    .result-card p {
+      color: var(--gray);
+      font-size: 0.93rem;
+    }
+
+    /* FINDING BLOCKS */
+
+    .findings {
+      display: grid;
+      gap: 18px;
+    }
+
+    .finding {
+      padding: 24px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .finding:last-child {
+      border-bottom: none;
+    }
+
+    .finding h3 {
+      color: var(--teal);
+      margin-bottom: 7px;
+      font-size: 1.08rem;
+    }
+
+    .finding p {
+      color: var(--gray);
+    }
+
+    /* MINI DATA VISUAL */
+
+    .comparison-wrap {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 34px;
+      align-items: center;
+    }
+
+    .bars {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 30px;
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+
+    .bar-row {
+      margin-bottom: 25px;
+    }
+
+    .bar-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.88rem;
+      font-weight: 700;
+      margin-bottom: 7px;
+    }
+
+    .bar-track {
+      height: 12px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--teal);
+    }
+
+    .germany {
+      width: 18%;
+      background: var(--red);
+    }
+
+    .france {
+      width: 72%;
+    }
+
+    .italy {
+      width: 96%;
+      background: #f59e0b;
+    }
+
+    .uk {
+      width: 100%;
+      background: #15803d;
+    }
+
+    /* PCA */
+
+    .pca-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .pca-card {
+      border-radius: var(--radius);
+      padding: 30px;
+      background: var(--navy);
+      color: white;
+    }
+
+    .pca-card .number {
+      color: #5eead4;
+      font-size: 2.3rem;
+      font-weight: 850;
+      margin-bottom: 4px;
+    }
+
+    .pca-card p {
+      color: #cbd5e1;
+      font-size: 0.92rem;
+    }
+
+    /* REGRESSION TABLE */
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 650px;
+      background: var(--white);
+    }
+
+    th,
+    td {
+      padding: 17px 20px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--light-gray);
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    td {
+      font-size: 0.94rem;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .positive {
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    /* LIMITATIONS */
+
+    .limit-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 22px;
+    }
+
+    .limit-card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      background: var(--white);
+    }
+
+    .limit-card h3 {
+      margin-bottom: 11px;
+    }
+
+    .limit-card p {
+      color: var(--gray);
+      font-size: 0.94rem;
+    }
+
+    /* TECHNOLOGIES */
+
+    .tech-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .tech {
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 9px 17px;
+      font-size: 0.86rem;
+      font-weight: 700;
+      background: white;
+    }
+
+    /* CTA */
+
+    .cta {
+      padding: 110px 0;
+      text-align: center;
+    }
+
+    .cta h2 {
+      font-size: clamp(2rem, 4vw, 3.1rem);
+      letter-spacing: -0.05em;
+      margin-bottom: 18px;
+    }
+
+    .cta p {
+      max-width: 720px;
+      margin: 0 auto 30px;
+      color: var(--gray);
+    }
+
+    /* FOOTER */
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0;
+      text-align: center;
+      color: var(--gray);
+      font-size: 0.9rem;
+    }
+
+    footer strong {
+      color: var(--navy);
+    }
+
+    /* RESPONSIVE */
+
+    @media (max-width: 900px) {
+      .stat-grid,
+      .method-grid,
+      .pca-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .comparison-wrap {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      nav {
+        display: none;
+      }
+
+      .hero {
+        padding-top: 80px;
+      }
+
+      .stat-grid,
+      .card-grid,
+      .method-grid,
+      .result-grid,
+      .pca-grid,
+      .limit-grid {
+        grid-template-columns: 1fr;
+      }
+
+      section {
+        padding: 70px 0;
+      }
+
+      .research-box {
+        padding: 24px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- NAVIGATION -->
+
+  <header>
+    <div class="container navbar">
+      <a class="brand" href="#">
+        🦠 COVID-19 <span>× Data Science</span>
+      </a>
+
+      <nav>
+        <a href="#overview">Overview</a>
+        <a href="#results">Results</a>
+        <a href="#pca">PCA</a>
+        <a href="COVID19_Data_Analysis_R.html">Full Analysis</a>
+        <a
+          href="https://github.com/ayaa137/COVID19-Data-Analysis-R"
+          target="_blank"
+        >
+          GitHub
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- HERO -->
+
+  <main>
+
+    <section class="hero">
+      <div class="container">
+
+        <span class="eyebrow">
+          Epidemiology · Data Science · Socioeconomic Analysis
+        </span>
+
+        <h1>
+          COVID-19 Data Analysis
+          <span>in R</span>
+        </h1>
+
+        <p class="hero-text">
+          A data-driven study of early COVID-19 dynamics and country-level
+          socioeconomic context using daily World Health Organization data
+          and World Bank Development Indicators.
+        </p>
+
+        <p class="author-line">
+          Developed by <strong>Aya Abdine</strong><br />
+          MSc Data Science for Society and Business · Constructor University
+        </p>
+
+        <div class="hero-buttons">
+          <a
+            class="btn btn-primary"
+            href="COVID19_Data_Analysis_R.html"
+          >
+            View Full Analysis
+          </a>
+
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/ayaa137/COVID19-Data-Analysis-R"
+            target="_blank"
+          >
+            View GitHub Repository
+          </a>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- PROJECT STATS -->
+
+    <section class="stats">
+      <div class="container">
+
+        <div class="stat-grid">
+
+          <div class="stat-card">
+            <div class="stat-number">237,474</div>
+            <div class="stat-label">WHO Daily Records</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">237</div>
+            <div class="stat-label">Countries in WHO Data</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">4 Days</div>
+            <div class="stat-label">Germany Best Case-to-Death Lag</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">80.3%</div>
+            <div class="stat-label">Variance Explained by PC1 + PC2</div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- OVERVIEW -->
+
+    <section id="overview">
+      <div class="container">
+
+        <div class="section-label">About the Project</div>
+
+        <h2 class="section-title">
+          Project Overview
+        </h2>
+
+        <p class="section-intro">
+          This project investigates how reported COVID-19 cases and deaths
+          evolved during the early pandemic and how later cross-country
+          mortality patterns relate to demographic, health, and socioeconomic
+          characteristics.
+        </p>
+
+        <p class="section-intro">
+          Germany is used as the main time-series case study, followed by a
+          comparison with France, Italy, and the United Kingdom. The analysis
+          then expands globally using World Bank development indicators.
+        </p>
+
+        <div class="research-box">
+
+          <strong>Research Question</strong>
+
+          <p>
+            How did COVID-19 evolve across countries during the early pandemic,
+            and how were pandemic outcomes related to demographic, health, and
+            socioeconomic characteristics?
+          </p>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- DATASETS -->
+
+    <section class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Data</div>
+
+        <h2 class="section-title">
+          Two Complementary Datasets
+        </h2>
+
+        <p class="section-intro">
+          The project combines epidemiological time-series data with
+          country-level socioeconomic indicators to study both epidemic timing
+          and structural country characteristics.
+        </p>
+
+        <div class="card-grid">
+
+          <div class="card">
+
+            <div class="card-icon">🦠</div>
+
+            <h3>WHO COVID-19 Dataset</h3>
+
+            <p>
+              Daily reported cases and deaths used for time-series analysis,
+              country comparisons, lag estimation, and epidemic growth
+              modeling.
+            </p>
+
+            <ul>
+              <li>237,474 daily observations</li>
+              <li>237 countries</li>
+              <li>January 2020 to September 2022</li>
+              <li>Daily reported cases</li>
+              <li>Daily reported deaths</li>
+              <li>WHO region information</li>
+            </ul>
+
+          </div>
+
+          <div class="card">
+
+            <div class="card-icon">🌍</div>
+
+            <h3>World Development Indicators</h3>
+
+            <p>
+              Country-level demographic, economic, and healthcare indicators
+              used for correlation analysis, PCA, and cross-country mortality
+              modeling.
+            </p>
+
+            <ul>
+              <li>217 countries</li>
+              <li>Population</li>
+              <li>Population aged 65+</li>
+              <li>Urban population</li>
+              <li>Population density</li>
+              <li>Physicians per 1,000</li>
+              <li>Life expectancy</li>
+              <li>GDP per capita</li>
+            </ul>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- METHODOLOGY -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">Methodology</div>
+
+        <h2 class="section-title">
+          Analysis Approach
+        </h2>
+
+        <div class="method-grid">
+
+          <div class="method-card">
+
+            <div class="card-icon">🧹</div>
+
+            <h3>Data Preparation</h3>
+
+            <p>
+              Dates, country names, missing values, reporting corrections, and
+              World Bank indicators were cleaned and standardized before
+              analysis.
+            </p>
+
+          </div>
+
+          <div class="method-card">
+
+            <div class="card-icon">📈</div>
+
+            <h3>Time-Series Analysis</h3>
+
+            <p>
+              Seven-day moving averages, exponential-growth modeling, turning
+              points, and case-to-death lag optimization were used to study
+              epidemic dynamics.
+            </p>
+
+          </div>
+
+          <div class="method-card">
+
+            <div class="card-icon">📊</div>
+
+            <h3>Cross-Country Analysis</h3>
+
+            <p>
+              Correlations, PCA, regression, and population-normalized
+              mortality measures were used to compare country characteristics
+              and outcomes.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- RESULTS -->
+
+    <section id="results" class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Statistical Results</div>
+
+        <h2 class="section-title">
+          Main Results
+        </h2>
+
+        <div class="result-grid">
+
+          <div class="result-card">
+
+            <div class="result-value">4 days</div>
+
+            <h3>Germany Case-to-Death Lag</h3>
+
+            <p>
+              Grid-search optimization estimated a four-day lag between
+              Germany's smoothed reported cases and deaths during the first
+              wave.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">0.055</div>
+
+            <h3>First-Wave Case-to-Death Scale</h3>
+
+            <p>
+              The fitted reported-case death scale was 0.055 with an RMSE of
+              approximately 19.5 daily deaths.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">22.0%</div>
+
+            <h3>Early Daily Case Growth</h3>
+
+            <p>
+              Germany's early March reported cases grew at approximately 22%
+              per day during the modeled exponential-growth period.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">3.1 days</div>
+
+            <h3>Estimated Doubling Time</h3>
+
+            <p>
+              The early exponential growth rate corresponds to an approximate
+              case doubling time of 3.1 days.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- EUROPE -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">European Comparison</div>
+
+        <h2 class="section-title">
+          First-Wave Mortality Burden
+        </h2>
+
+        <div class="comparison-wrap">
+
+          <div>
+
+            <p class="section-intro">
+              Cumulative reported COVID-19 deaths were normalized by
+              population to make comparisons across major European countries
+              more meaningful.
+            </p>
+
+            <div class="findings">
+
+              <div class="finding">
+
+                <h3>🇩🇪 Germany</h3>
+
+                <p>
+                  Germany experienced a substantially lower reported mortality
+                  burden per 100,000 people through June 2020 than the other
+                  countries in this comparison.
+                </p>
+
+              </div>
+
+              <div class="finding">
+
+                <h3>🇮🇹 Italy and 🇬🇧 United Kingdom</h3>
+
+                <p>
+                  Italy and the United Kingdom reached the highest reported
+                  mortality levels in the comparison by the end of June 2020.
+                </p>
+
+              </div>
+
+              <div class="finding">
+
+                <h3>Interpretation</h3>
+
+                <p>
+                  These are descriptive reporting outcomes and do not identify
+                  which individual policies or structural conditions caused
+                  the observed differences.
+                </p>
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <div class="bars">
+
+            <div class="bar-row">
+              <div class="bar-label">
+                <span>Germany</span>
+                <span>Lower burden</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill germany"></div>
+              </div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-label">
+                <span>France</span>
+                <span>Higher</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill france"></div>
+              </div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-label">
+                <span>Italy</span>
+                <span>High</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill italy"></div>
+              </div>
+            </div>
+
+            <div class="bar-row">
+              <div class="bar-label">
+                <span>United Kingdom</span>
+                <span>High</span>
+              </div>
+              <div class="bar-track">
+                <div class="bar-fill uk"></div>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TURNING POINT -->
+
+    <section class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Time-Series Insight</div>
+
+        <h2 class="section-title">
+          Germany's First-Wave Turning Point
+        </h2>
+
+        <div class="result-grid">
+
+          <div class="result-card">
+
+            <div class="result-value">20 Mar</div>
+
+            <h3>Fastest Increase</h3>
+
+            <p>
+              The fastest increase in Germany's smoothed reported cases
+              occurred around March 20, 2020.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">4 Apr</div>
+
+            <h3>Smoothed Case Peak</h3>
+
+            <p>
+              Germany's first-wave 7-day average reached its peak in early
+              April 2020.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">5 Apr</div>
+
+            <h3>Sustained Decline</h3>
+
+            <p>
+              The first sustained transition from rising to falling smoothed
+              case counts began around April 5.
+            </p>
+
+          </div>
+
+          <div class="result-card">
+
+            <div class="result-value">7-day</div>
+
+            <h3>Smoothing Window</h3>
+
+            <p>
+              A seven-day moving average reduces weekly reporting noise while
+              preserving the main epidemic pattern.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CORRELATIONS -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">Socioeconomic Context</div>
+
+        <h2 class="section-title">
+          Development Indicators Are Strongly Interrelated
+        </h2>
+
+        <p class="section-intro">
+          Income, health-system capacity, longevity, urbanization, and age
+          structure form a strongly connected country-level development
+          profile.
+        </p>
+
+        <div class="result-grid">
+
+          <div class="result-card">
+            <div class="result-value">0.84</div>
+            <h3>GDP × Life Expectancy</h3>
+            <p>
+              GDP per capita shows a strong positive correlation with life
+              expectancy.
+            </p>
+          </div>
+
+          <div class="result-card">
+            <div class="result-value">0.76</div>
+            <h3>GDP × Physicians</h3>
+            <p>
+              Higher-income countries also tend to have more physicians per
+              1,000 people.
+            </p>
+          </div>
+
+          <div class="result-card">
+            <div class="result-value">0.72</div>
+            <h3>GDP × Population 65+</h3>
+            <p>
+              Higher-income countries tend to have older population
+              structures.
+            </p>
+          </div>
+
+          <div class="result-card">
+            <div class="result-value">0.69</div>
+            <h3>GDP × Urban Population</h3>
+            <p>
+              Income is also positively related to urban population share.
+            </p>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- PCA -->
+
+    <section id="pca" class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Dimensionality Reduction</div>
+
+        <h2 class="section-title">
+          Principal Component Analysis
+        </h2>
+
+        <p class="section-intro">
+          PCA summarizes correlated socioeconomic indicators into a smaller
+          number of components that capture broad differences among countries.
+          The analysis uses 193 complete country observations.
+        </p>
+
+        <div class="pca-grid">
+
+          <div class="pca-card">
+
+            <div class="number">63.0%</div>
+
+            <h3>PC1</h3>
+
+            <p>
+              The first principal component captures the majority of the
+              selected-indicator variation.
+            </p>
+
+          </div>
+
+          <div class="pca-card">
+
+            <div class="number">17.3%</div>
+
+            <h3>PC2</h3>
+
+            <p>
+              The second component captures additional structural differences,
+              especially those associated with population density.
+            </p>
+
+          </div>
+
+          <div class="pca-card">
+
+            <div class="number">80.3%</div>
+
+            <h3>PC1 + PC2</h3>
+
+            <p>
+              Together, the first two components summarize more than four
+              fifths of the selected socioeconomic variation.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- REGRESSION -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">Cross-Country Modeling</div>
+
+        <h2 class="section-title">
+          COVID Mortality and Socioeconomic Indicators
+        </h2>
+
+        <p class="section-intro">
+          A cross-country regression model using 184 complete observations
+          examines whether broad structural indicators align with log COVID-19
+          deaths per 100,000 population.
+        </p>
+
+        <div class="table-wrap">
+
+          <table>
+
+            <thead>
+              <tr>
+                <th>Predictor</th>
+                <th>Direction</th>
+                <th>Estimate</th>
+                <th>p-value</th>
+              </tr>
+            </thead>
+
+            <tbody>
+
+              <tr>
+                <td>Log10 GDP per capita</td>
+                <td class="positive">Positive</td>
+                <td>1.392</td>
+                <td>&lt; 0.001</td>
+              </tr>
+
+              <tr>
+                <td>Population aged 65+ (%)</td>
+                <td class="positive">Positive</td>
+                <td>0.070</td>
+                <td>&lt; 0.001</td>
+              </tr>
+
+              <tr>
+                <td>Physicians per 1,000</td>
+                <td class="positive">Positive</td>
+                <td>0.074</td>
+                <td>0.449</td>
+              </tr>
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+        <div style="margin-top: 30px" class="research-box">
+
+          <strong>Model Performance</strong>
+
+          <p>
+            The final model has an
+            <strong>adjusted R² of 0.560</strong>, meaning that approximately
+            56% of the variation in log deaths per 100,000 among complete
+            observations is captured by the included predictors.
+          </p>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CROSS COUNTRY -->
+
+    <section class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Cross-Country Timing</div>
+
+        <h2 class="section-title">
+          Lag and Scale Across Countries
+        </h2>
+
+        <div class="stat-grid">
+
+          <div class="stat-card">
+            <div class="stat-number">84</div>
+            <div class="stat-label">Countries After Quality Filtering</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">4 Days</div>
+            <div class="stat-label">Median Estimated Lag</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">25</div>
+            <div class="stat-label">Countries at 0-Day Boundary</div>
+          </div>
+
+          <div class="stat-card">
+            <div class="stat-number">1.6%</div>
+            <div class="stat-label">Median RMSE Increase if Lag 0 Is Removed</div>
+          </div>
+
+        </div>
+
+        <p
+          class="section-intro"
+          style="margin-top: 38px; margin-bottom: 0"
+        >
+          Countries whose optimization reached the zero-day lower boundary
+          were tested separately. When zero was disallowed, their median RMSE
+          increased by only 1.6%, suggesting that many of these estimates
+          represent relatively flat or weakly identified fits rather than
+          strong evidence of same-day epidemiological timing.
+        </p>
+
+      </div>
+    </section>
+
+    <!-- FINDINGS -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">Insights</div>
+
+        <h2 class="section-title">
+          Main Findings
+        </h2>
+
+        <div class="findings">
+
+          <div class="finding">
+
+            <h3>📈 Rapid Early Growth</h3>
+
+            <p>
+              Germany's first wave accelerated rapidly in March 2020, with
+              early reported cases growing approximately 22% per day and
+              doubling in roughly 3.1 days.
+            </p>
+
+          </div>
+
+          <div class="finding">
+
+            <h3>⏱️ Cases and Deaths Followed Different Timing</h3>
+
+            <p>
+              Germany's first-wave data produced an optimized reported
+              case-to-death lag of four days, although this relationship
+              changed substantially in later pandemic periods.
+            </p>
+
+          </div>
+
+          <div class="finding">
+
+            <h3>🌍 Country Development Indicators Move Together</h3>
+
+            <p>
+              GDP, longevity, healthcare capacity, age structure, and
+              urbanization are strongly correlated and form a shared
+              country-development profile.
+            </p>
+
+          </div>
+
+          <div class="finding">
+
+            <h3>📊 Socioeconomic Context Explains Only Part of Mortality</h3>
+
+            <p>
+              The mortality regression achieved an adjusted R² of 0.560,
+              indicating meaningful but incomplete alignment between
+              structural indicators and country-level reported mortality.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- LIMITATIONS -->
+
+    <section class="soft-section">
+      <div class="container">
+
+        <div class="section-label">Critical Evaluation</div>
+
+        <h2 class="section-title">
+          Limitations
+        </h2>
+
+        <div class="limit-grid">
+
+          <div class="limit-card">
+
+            <h3>Reporting Differences</h3>
+
+            <p>
+              Testing availability, reporting systems, certification
+              practices, and case definitions differed substantially across
+              countries and throughout the pandemic.
+            </p>
+
+          </div>
+
+          <div class="limit-card">
+
+            <h3>Ecological Analysis</h3>
+
+            <p>
+              Cross-country associations describe country-level patterns and
+              cannot establish individual-level relationships or causal
+              effects.
+            </p>
+
+          </div>
+
+          <div class="limit-card">
+
+            <h3>Missing Indicators</h3>
+
+            <p>
+              Missing World Bank indicators reduce the number of countries
+              available for complete-case PCA and regression analyses.
+            </p>
+
+          </div>
+
+          <div class="limit-card">
+
+            <h3>Changing Pandemic Conditions</h3>
+
+            <p>
+              Vaccination, variants, treatment improvements, testing capacity,
+              demographic exposure, and healthcare pressure changed the
+              relationship between cases and deaths over time.
+            </p>
+
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TECHNOLOGIES -->
+
+    <section>
+      <div class="container">
+
+        <div class="section-label">Tools</div>
+
+        <h2 class="section-title">
+          Technologies Used
+        </h2>
+
+        <div class="tech-list">
+
+          <span class="tech">R</span>
+          <span class="tech">Quarto</span>
+          <span class="tech">tidyverse</span>
+          <span class="tech">dplyr</span>
+          <span class="tech">ggplot2</span>
+          <span class="tech">tidyr</span>
+          <span class="tech">broom</span>
+          <span class="tech">janitor</span>
+          <span class="tech">Git</span>
+          <span class="tech">GitHub</span>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- CTA -->
+
+    <section class="cta soft-section">
+      <div class="container">
+
+        <h2>
+          Explore the Full Project
+        </h2>
+
+        <p>
+          View the complete analysis for data preparation, COVID-19
+          time-series exploration, European comparisons, lag optimization,
+          PCA, regression, exponential growth modeling, and cross-country
+          results.
+        </p>
+
+        <div class="hero-buttons">
+
+          <a
+            class="btn btn-primary"
+            href="COVID19_Data_Analysis_R.html"
+          >
+            Open Full Analysis
+          </a>
+
+          <a
+            class="btn btn-secondary"
+            href="report.qmd"
+          >
+            View Quarto Source
+          </a>
+
+          <a
+            class="btn btn-secondary"
+            href="https://github.com/ayaa137/COVID19-Data-Analysis-R"
+            target="_blank"
+          >
+            GitHub Repository
+          </a>
+
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FOOTER -->
+
+  <footer>
+    <div class="container">
+
+      <p>
+        <strong>Aya Abdine</strong>
+      </p>
+
+      <p>
+        MSc Data Science for Society and Business · Constructor University
+      </p>
+
+    </div>
+  </footer>
+
+</body>
+</html>
