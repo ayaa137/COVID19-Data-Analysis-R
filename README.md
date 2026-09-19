@@ -263,6 +263,12 @@ The complete analysis is available in:
 
 The HTML report presents the full project in a portfolio-friendly format while allowing the underlying R code to be viewed when needed.
 
+## 🌐 Project Website
+
+An interactive portfolio website provides a concise overview of the analysis, key findings, methodology, and statistical results.
+
+**Live website:** [View the live project website](https://ayaa137.github.io/COVID19-Data-Analysis-R/)
+
 ## ⚠️ Limitations
 
 Several limitations should be considered when interpreting the results.
